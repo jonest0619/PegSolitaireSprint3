@@ -1,6 +1,10 @@
-com\example\PegSolitaire$GameState.class
-com\example\PegSolitaire$GameOverResult.class
+com\example\PegSolitaireGame$GameOverResult.class
 com\example\App.class
-com\example\PegSolitaire$GameOutcome.class
+com\example\PegSolitaireGame$GameMode.class
+com\example\PegSolitaireGame$Move.class
+com\example\PegSolitaireGame$GameState.class
 com\example\PegSolitaire.class
-com\example\PegSolitaire$BoardType.class
+com\example\PegSolitaireGame$GameOutcome.class
+com\example\PegSolitaireGame.class
+com\example\PegSolitaireGame$AutomatedTurn.class
+com\example\PegSolitaireGame$BoardType.class

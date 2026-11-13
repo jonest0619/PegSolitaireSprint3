@@ -1,6 +1,7 @@
 package com.example;
 
 import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -12,143 +13,50 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-
-import java.util.List;
 import java.util.Optional;
-import java.util.function.BooleanSupplier;
+import java.util.Random;
 
 public class PegSolitaire extends Application {
+    static final int AUTOMATED_MOVE_DELAY_MILLIS = 600;
 
-    enum GameOutcome {
-        WON,
-        LOST
-    }
-
-    record GameOverResult(
-        GameOutcome outcome,
-        int remainingPegs,
-        String title,
-        String message,
-        List<String> actions
-    ) {}
-
-    static final class GameState {
-        private int[][] grid;
-        private int score;
-        private int secondsElapsed;
-
-        void startNewGame(BoardType boardType) {
-            grid = boardType.createInitialGrid();
-            score = 0;
-            secondsElapsed = 0;
-        }
-
-        boolean restartIfConfirmed(BoardType boardType, BooleanSupplier confirmation) {
-            if (!confirmation.getAsBoolean()) {
-                return false;
-            }
-
-            startNewGame(boardType);
-            return true;
-        }
-
-        int[][] getGrid() {
-            return grid;
-        }
-
-        int getScore() {
-            return score;
-        }
-
-        int getSecondsElapsed() {
-            return secondsElapsed;
-        }
-
-        void addScore(int points) {
-            score += points;
-        }
-
-        void incrementSecondsElapsed() {
-            secondsElapsed++;
-        }       
-        
-    }
-
-    public enum BoardType {
-    ENGLISH_33("English (33 Holes)", new int[][]{
-        {0, 0, 1, 1, 1, 0, 0},
-        {0, 0, 1, 1, 1, 0, 0},
-        {1, 1, 1, 1, 1, 1, 1},
-        {1, 1, 1, 2, 1, 1, 1}, // Center empty
-        {1, 1, 1, 1, 1, 1, 1},
-        {0, 0, 1, 1, 1, 0, 0},
-        {0, 0, 1, 1, 1, 0, 0}
-    }),
-    DIAMOND_41("Diamond (41 Holes)", new int[][]{
-        {0, 0, 0, 0, 1, 0, 0, 0, 0},
-        {0, 0, 0, 1, 1, 1, 0, 0, 0},
-        {0, 0, 1, 1, 1, 1, 1, 0, 0},
-        {0, 1, 1, 1, 1, 1, 1, 1, 0},
-        {1, 1, 1, 1, 2, 1, 1, 1, 1}, // Center empty
-        {0, 1, 1, 1, 1, 1, 1, 1, 0},
-        {0, 0, 1, 1, 1, 1, 1, 0, 0},
-        {0, 0, 0, 1, 1, 1, 0, 0, 0},
-        {0, 0, 0, 0, 1, 0, 0, 0, 0}
-    }),
-
-    HEXAGON_21("Hexagon (21 Holes)", new int[][]{
-        {0, 0, 1, 1, 1, 0, 0},
-        {0, 1, 1, 1, 1, 1, 0},
-        {0, 1, 1, 2, 1, 1, 0}, // Center empty
-        {0, 1, 1, 1, 1, 1, 0},
-        {0, 0, 1, 1, 1, 0, 0}
-    });
-
-    private final String displayName;
-    private final int[][] defaultGrid;
-
-    BoardType(String displayName, int[][] defaultGrid) {
-        this.displayName = displayName;
-        this.defaultGrid = defaultGrid;
-    }
-
-    public String getDisplayName() { return displayName; }
-
-    public int[][] createInitialGrid() {
-        // Deep copy array so mutations don't overwrite original template
-        int rows = defaultGrid.length;
-        int cols = defaultGrid[0].length;
-        int[][] copy = new int[rows][cols];
-        for (int r = 0; r < rows; r++) {
-            System.arraycopy(defaultGrid[r], 0, copy[r], 0, cols);
-        }
-        return copy;
-    }
-
-    @Override
-    public String toString() {
-        return displayName;
-    }
-}
-    private final GameState gameState = new GameState();
+    private final PegSolitaireGame.GameState gameState = new PegSolitaireGame.GameState();
     private GridPane boardContainer;
-    private ComboBox<BoardType> boardSelector;
+    private ComboBox<PegSolitaireGame.BoardType> boardSelector;
+    private ComboBox<PegSolitaireGame.GameMode> gameModeSelector;
+    private final PauseTransition autoMovePause =
+        new PauseTransition(Duration.millis(AUTOMATED_MOVE_DELAY_MILLIS));
+
 
     // Game Metrics (AC 3.2)
     private Label scoreLabel;
     private Label timerLabel;
     private Timeline gameTimer;
-    private boolean gameInProgress = false;
+    private Button startButton;
+    private Button randomizeButton;
 
     @Override
     public void start(Stage primaryStage) {
         BorderPane root = new BorderPane();
 
+        gameModeSelector = new ComboBox<>();
+        gameModeSelector.getItems().setAll(PegSolitaireGame.GameMode.values());
+        gameModeSelector.setValue(PegSolitaireGame.GameMode.MANUAL);
+        gameModeSelector.setOnAction(e -> handleGameModeChange());
+
+
+
         boardSelector = new ComboBox<>();
-        boardSelector.getItems().setAll(BoardType.values());
-        boardSelector.setValue(BoardType.ENGLISH_33);
+        boardSelector.getItems().setAll(PegSolitaireGame.BoardType.values());
+        boardSelector.setValue(PegSolitaireGame.BoardType.ENGLISH_33);
 
         boardSelector.setOnAction(e -> handleBoardSelectionChange());
+
+        startButton = new Button("Start");
+        startButton.setOnAction(e -> startGameTimer());
+
+        randomizeButton = new Button("Randomize");
+        randomizeButton.setDisable(true);
+        randomizeButton.setOnAction(e -> handleRandomizeRequest());
 
         Button restartButton = new Button("Restart");
         restartButton.setOnAction(e -> handleRestartRequest());
@@ -163,6 +71,11 @@ public class PegSolitaire extends Application {
         HBox topBar = new HBox(12, 
             new Label("Board Size and Type:"), 
             boardSelector, 
+            new Label("Mode:"),
+            gameModeSelector,
+
+            startButton,
+            randomizeButton,
             restartButton,
             scoreLabel,
             timerLabel
@@ -182,16 +95,84 @@ public class PegSolitaire extends Application {
 
         initiateNewGame();
 
-        Scene scene = new Scene(root, 550, 600);
+        Scene scene = new Scene(root, 950, 600);
         primaryStage.setTitle("Peg Solitaire");
         primaryStage.setScene(scene);
         primaryStage.show();
 
     }
 
+    private void handleGameModeChange() {
+        gameState.setGameMode(gameModeSelector.getValue());
+        if (gameState.isAutomatedMoveAllowed()) {
+            scheduleAutomatedMove();
+        } else {
+            autoMovePause.stop();
+            selectedRow = -1;
+            selectedCol = -1;
+            renderBoard();
+        }
+        updateRandomizeButtonState();
+    }
+
+    private void scheduleAutomatedMove() {
+        autoMovePause.stop();
+
+        if (!gameState.isAutomatedMoveAllowed()) {
+            return;
+        }
+
+        autoMovePause.setOnFinished(event -> {
+            PegSolitaireGame.AutomatedTurn turn = gameState.performAutomatedTurn();
+            if (turn.moved()) {
+                selectedRow = -1;
+                selectedCol = -1;
+                scoreLabel.setText("Score: " + gameState.getScore());
+                renderBoard();
+            }
+
+            if (turn.gameOver().isPresent()) {
+                handleGameOver(turn.gameOver().get());
+            } else if (gameState.isAutomatedMoveAllowed()) {
+                scheduleAutomatedMove();
+            }
+        });
+
+        autoMovePause.playFromStart();
+    }
+
+    private void handleRandomizeRequest() {
+        if (!gameState.isInProgress() || !gameState.isStarted() ||
+            gameModeSelector.getValue() != PegSolitaireGame.GameMode.MANUAL) {
+            return;
+        }
+
+        if (!gameState.randomizeBoard(new Random())) {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.initOwner(boardContainer.getScene().getWindow());
+            alert.setTitle("Cannot Randomize Board");
+            alert.setContentText("The board cannot be randomized into a playable position.");
+            alert.show();
+            return;
+        }
+
+        selectedRow = -1;
+        selectedCol = -1;
+        renderBoard();
+    }
+
+    private void updateRandomizeButtonState() {
+        if (randomizeButton != null) {
+            randomizeButton.setDisable(
+                !gameState.isInProgress() || !gameState.isStarted() ||
+                gameModeSelector.getValue() != PegSolitaireGame.GameMode.MANUAL
+            );
+        }
+    }
+
 
     private void handleBoardSelectionChange() {
-        if (gameInProgress) {
+        if (gameState.isInProgress()) {
             if (confirmRestart("Change Board Type", "Are you sure you want to change the board?")) {
                 initiateNewGame();
             } else {
@@ -204,10 +185,9 @@ public class PegSolitaire extends Application {
     }
 
     private void handleRestartRequest() {
-        if (gameInProgress) {
-            if (gameState.restartIfConfirmed(
-                    boardSelector.getValue(),
-                    () -> confirmRestart("Restart Game", "Are you sure you want to restart?"))) {
+        if (gameState.isInProgress()) {
+            if (confirmRestart("Restart Game", "Are you sure you want to restart?")) {
+                gameState.startNewGame(boardSelector.getValue());
                 selectedRow = -1;
                 selectedCol = -1;
                 resetMetrics();
@@ -232,7 +212,7 @@ public class PegSolitaire extends Application {
      * AC 3.1 & 3.2: Resets metrics, loads fresh board array, and renders UI.
      */
     private void initiateNewGame() {
-        BoardType selectedType = boardSelector.getValue();
+        PegSolitaireGame.BoardType selectedType = boardSelector.getValue();
         if (selectedType == null) return;
 
         selectedRow = -1;
@@ -247,7 +227,8 @@ public class PegSolitaire extends Application {
         // Render starting board
         renderBoard();
 
-        gameInProgress = true;
+        updateRandomizeButtonState();
+        scheduleAutomatedMove();
     }
 
     /**
@@ -259,8 +240,23 @@ public class PegSolitaire extends Application {
             gameState.getSecondsElapsed() / 60, gameState.getSecondsElapsed() % 60));
 
         if (gameTimer != null) {
-            gameTimer.playFromStart();
+            gameTimer.stop();
         }
+        if (startButton != null) {
+            startButton.setDisable(false);
+        }
+        updateRandomizeButtonState();
+    }
+
+    private void startGameTimer() {
+        if (!gameState.start()) {
+            return;
+        }
+
+        gameTimer.playFromStart();
+        startButton.setDisable(true);
+        updateRandomizeButtonState();
+        scheduleAutomatedMove();
     }
 
     private void setupTimer() {
@@ -273,19 +269,14 @@ public class PegSolitaire extends Application {
         gameTimer.setCycleCount(Timeline.INDEFINITE);
     }
 
-    private BoardType getCurrentBoardType() {
-        for (BoardType type : BoardType.values()) {
-            if (type.getDisplayName().equals(boardSelector.getValue().getDisplayName())) {
-                return type;
-            }
-        }
-        return BoardType.ENGLISH_33;
+    private PegSolitaireGame.BoardType getCurrentBoardType() {
+        return gameState.getBoardType();
     }
 
     private void renderBoard() {
         boardContainer.getChildren().clear();
 
-        int[][] currentGrid = gameState.getGrid();
+        int[][] currentGrid = gameState.getGridSnapshot();
         int rows = currentGrid.length;
         int cols = currentGrid[0].length;
 
@@ -331,8 +322,15 @@ public class PegSolitaire extends Application {
     }
 
     private void handleCellClick(int row, int col) {
-        int[][] currentGrid = gameState.getGrid();
-        int cellState = currentGrid[row][col];
+        if (!gameState.isStarted()) {
+            return;
+        }
+
+        int cellState = gameState.getCellState(row, col);
+
+        if (gameModeSelector.getValue() == PegSolitaireGame.GameMode.AUTOMATED) {
+            return;
+        }
 
         if (cellState == 1) {
             if (selectedRow == row && selectedCol == col){
@@ -347,7 +345,7 @@ public class PegSolitaire extends Application {
         }
 
         if (cellState == 2 && selectedRow != -1 && selectedCol != -1){
-            if (isValidMove(currentGrid, selectedRow, selectedCol, row, col)) {
+            if (gameState.isValidMove(selectedRow, selectedCol, row, col)) {
                 executeMove(selectedRow, selectedCol, row, col);
             } else{
                 System.out.println("Invalid move");
@@ -355,49 +353,8 @@ public class PegSolitaire extends Application {
         }
     }
 
-    static boolean isValidMove(int[][] grid, int fromR, int fromC, int toR, int toC) {
-        if (fromR < 0 || fromR >= grid.length ||
-            fromC < 0 || fromC >= grid[fromR].length ||
-            toR < 0 || toR >= grid.length ||
-            toC < 0 || toC >= grid[toR].length) {
-            return false;
-        }
-
-        // The source must have a peg and the destination must be an empty hole.
-        if (grid[fromR][fromC] != 1) return false;
-        if (grid[toR][toC] != 2) return false;
-
-        int rowDiff = Math.abs(fromR - toR);
-        int colDiff = Math.abs(fromC - toC);
-
-        // 2. Must move strictly along 1 axis by exactly 2 spaces
-        boolean isOrthogonal2Spaces = (rowDiff == 2 && colDiff == 0) || (rowDiff == 0 && colDiff == 2);
-        if (!isOrthogonal2Spaces) return false;
-
-        // 3. Find the middle cell being jumped over
-        int midR = (fromR + toR) / 2;
-        int midC = (fromC + toC) / 2;
-
-        // 4. Middle cell must contain a peg (State 1)
-        return grid[midR][midC] == 1;
-    }
-
-    static boolean applyMove(int[][] grid, int fromR, int fromC, int toR, int toC) {
-        if (!isValidMove(grid, fromR, fromC, toR, toC)) {
-            return false;
-        }
-
-        int midR = (fromR + toR) / 2;
-        int midC = (fromC + toC) / 2;
-        grid[fromR][fromC] = 2;
-        grid[midR][midC] = 2;
-        grid[toR][toC] = 1;
-        return true;
-    }
-
     private void executeMove(int fromR, int fromC, int toR, int toC) {
-        int[][] currentGrid = gameState.getGrid();
-        if (!applyMove(currentGrid, fromR, fromC, toR, toC)) {
+        if (!gameState.applyMove(fromR, fromC, toR, toC)) {
             return;
         }
 
@@ -405,116 +362,58 @@ public class PegSolitaire extends Application {
         selectedRow = -1;
         selectedCol = -1;
 
-        // Update Score (+10 per successful move)
-        gameState.addScore(10);
         scoreLabel.setText("Score: " + gameState.getScore());
 
         // Re-render Board UI
         renderBoard();
 
         checkGameOver();
-}
-
-    static Optional<GameOverResult> getGameOverResult(int[][] grid, int score, String time) {
-        if (hasAnyValidMoves(grid)) {
-            return Optional.empty();
-        }
-
-        int remainingPegs = countRemainingPegs(grid);
-        if (remainingPegs == 1) {
-            return Optional.of(new GameOverResult(
-                GameOutcome.WON,
-                remainingPegs,
-                "YOU WINNNNN!",
-                String.format(
-                    "1 peg remaining!\nFinal Score: %d | Time: %s",
-                    score,
-                    time
-                ),
-                List.of("Restart", "Exit")
-            ));
-        }
-
-        return Optional.of(new GameOverResult(
-            GameOutcome.LOST,
-            remainingPegs,
-            "Game Over",
-            String.format(
-                "Game Over :O You have %d pegs remaining. \nFinal Score: %d | Time: %s",
-                remainingPegs,
-                score,
-                time
-            ),
-            List.of("Restart", "Exit")
-        ));
     }
 
     private void checkGameOver() {
-        Optional<GameOverResult> result = getGameOverResult(
-            gameState.getGrid(),
-            gameState.getScore(),
-            timerLabel.getText().replace("Time: ", "")
-        );
+        if (!gameState.isInProgress()) {
+            return;
+        }
+
+        Optional<PegSolitaireGame.GameOverResult> result = gameState.getGameOverResult();
         if (result.isEmpty()) {
             return;
         }
 
-        GameOverResult gameOver = result.get();
+        gameState.finish();
+        handleGameOver(result.get());
+    }
+
+    private void handleGameOver(PegSolitaireGame.GameOverResult gameOver) {
+        autoMovePause.stop();
         if (gameTimer != null) {
             gameTimer.stop();
         }
-        gameInProgress = false;
+        updateRandomizeButtonState();
 
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        ButtonType restartBtn = new ButtonType(
-            gameOver.actions().get(0),
-            ButtonBar.ButtonData.OK_DONE
-        );
-        ButtonType exitBtn = new ButtonType(
-            gameOver.actions().get(1),
-            ButtonBar.ButtonData.CANCEL_CLOSE
-        );
-        alert.getButtonTypes().setAll(restartBtn, exitBtn);
-        alert.setTitle(gameOver.title());
-        alert.setContentText(gameOver.message());
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.initOwner(boardContainer.getScene().getWindow());
+            ButtonType restartBtn = new ButtonType(
+                gameOver.actions().get(0),
+                ButtonBar.ButtonData.OK_DONE
+            );
+            ButtonType exitBtn = new ButtonType(
+                gameOver.actions().get(1),
+                ButtonBar.ButtonData.CANCEL_CLOSE
+            );
+            alert.getButtonTypes().setAll(restartBtn, exitBtn);
+            alert.setTitle(gameOver.title());
+            alert.setContentText(gameOver.message());
 
-        alert.showAndWait().ifPresent(response -> {
-            if (response == restartBtn) {
-                initiateNewGame();
-            } else if (response == exitBtn) {
-                Platform.exit();
-            }
-        });
-    }
-
-    static int countRemainingPegs(int[][] grid) {
-        int pegs = 0;
-        for (int[] row : grid) {
-            for (int cell : row) {
-                if (cell == 1) pegs++;
-            }
-        }
-        return pegs;
-    }
-    static boolean hasAnyValidMoves(int[][] grid) {
-        int rows = grid.length;
-        int cols = grid[0].length;
-
-        // Check every cell on the board
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                if (grid[r][c] == 1) { // Found a peg
-                    // Check all 4 orthogonal directions: Up, Down, Left, Right
-                    if (isValidMove(grid, r, c, r - 2, c) || // Up
-                        isValidMove(grid, r, c, r + 2, c) || // Down
-                        isValidMove(grid, r, c, r, c - 2) || // Left
-                        isValidMove(grid, r, c, r, c + 2)) { // Right
-                        return true; // At least one valid move exists
-                    }
+            alert.showAndWait().ifPresent(response -> {
+                if (response == restartBtn) {
+                    initiateNewGame();
+                } else if (response == exitBtn) {
+                    Platform.exit();
                 }
-            }
-        }
-        return false; // No valid moves remaining anywhere
+            });
+        });
     }
 
 public static void main(String[] args) {
